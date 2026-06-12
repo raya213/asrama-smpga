@@ -116,6 +116,8 @@ tbody tr td:last-child{border-top-right-radius:16px;border-bottom-right-radius:1
 .struktur-card h3{font-size:16px;font-weight:800;color:var(--text-dark);}
 .empty-pill{background:var(--card-bg);padding:30px;border-radius:20px;text-align:center;color:var(--text-light);font-size:13px;font-weight:500;margin-bottom:30px;}
 .modal-overlay{position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.4);backdrop-filter:blur(4px);display:none;justify-content:center;align-items:center;z-index:9999;}
+/* SweetAlert harus selalu di atas modal kustom (modal-overlay z-index 9999) */
+.swal2-container{z-index:100000 !important;}
 .modal-overlay.active{display:flex;}
 .modal-content{background:var(--card-bg);padding:40px;border-radius:30px;box-shadow:0 20px 50px rgba(0,0,0,0.2);max-width:850px;width:95%;text-align:left;position:relative;max-height:90vh;overflow-y:auto;}
 .close-btn{position:absolute;top:20px;right:20px;cursor:pointer;width:35px;height:35px;border-radius:50%;display:flex;justify-content:center;align-items:center;color:var(--text-dark);background:#f8f9fa;font-size:16px;transition:0.2s;}
