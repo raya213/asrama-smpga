@@ -394,7 +394,21 @@ tbody tr td:last-child{border-top-right-radius:16px;border-bottom-right-radius:1
 <div class="card metric-card" style="align-items:center;text-align:center;"><div class="metric-icon" style="color:var(--primary);background:#f0f4f8;margin-bottom:15px;width:50px;height:50px;font-size:20px;"><i class="fas fa-users"></i></div><h4 style="margin-bottom:15px;">Database Siswa</h4><button class="btn btn-primary" onclick="downloadPDF('siswa')" style="width:100%;"><i class="fas fa-file-pdf"></i> Unduh PDF</button></div>
 <div class="card metric-card" style="align-items:center;text-align:center;"><div class="metric-icon" style="color:var(--danger);background:#ffe4e6;margin-bottom:15px;width:50px;height:50px;font-size:20px;"><i class="fas fa-shield-alt"></i></div><h4 style="margin-bottom:15px;">Kedisiplinan</h4><button class="btn btn-primary" onclick="downloadPDF('pelanggaran')" style="width:100%;"><i class="fas fa-file-pdf"></i> Unduh PDF</button></div>
 <div class="card metric-card" style="align-items:center;text-align:center;"><div class="metric-icon" style="color:var(--success);background:#e4ffe9;margin-bottom:15px;width:50px;height:50px;font-size:20px;"><i class="fas fa-wallet"></i></div><h4 style="margin-bottom:15px;">Data Keuangan</h4><select class="form-control select-siswa" id="pdf-keuangan-siswa" style="margin-bottom:10px;font-size:11px;padding:10px;"></select><button class="btn btn-primary" onclick="downloadPDF('tabungan')" style="width:100%;"><i class="fas fa-file-pdf"></i> Unduh PDF</button></div>
+<div class="card metric-card" style="align-items:center;text-align:center;"><div class="metric-icon" style="color:#25d366;background:#e4ffe9;margin-bottom:15px;width:50px;height:50px;font-size:20px;"><i class="fab fa-whatsapp"></i></div><h4 style="margin-bottom:15px;">Broadcast Akses Wali</h4><button class="btn btn-primary" onclick="bukaBroadcastWA()" style="width:100%;background:linear-gradient(135deg,#25d366,#128c7e);border:none;box-shadow:0 6px 15px rgba(37,211,102,0.3);"><i class="fab fa-whatsapp"></i> Kirim via WA</button></div>
 <div class="card metric-card" style="align-items:center;text-align:center;"><div class="metric-icon" style="color:var(--warning);background:#fff0e4;margin-bottom:15px;width:50px;height:50px;font-size:20px;"><i class="fas fa-box"></i></div><h4 style="margin-bottom:15px;">Inventaris Aset</h4><button class="btn btn-primary" onclick="downloadPDF('inventaris')" style="width:100%;"><i class="fas fa-file-pdf"></i> Unduh PDF</button></div>
+</div>
+<!-- === BROADCAST WA WALI === -->
+<div class="card" id="broadcast-area" style="display:none;padding:30px;margin-top:20px;">
+<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px;">
+<h3 style="font-size:16px;font-weight:700;"><i class="fab fa-whatsapp" style="color:#25d366;"></i> Broadcast Akses Portal Wali</h3>
+<div style="display:flex;gap:10px;flex-wrap:wrap;">
+<select class="form-control" id="bc_filter" onchange="renderBroadcastList()" style="width:auto;padding:10px 15px;font-size:12px;"><option value="">Semua Siswa</option><option value="Putra">Asrama Putra</option><option value="Putri">Asrama Putri</option><option value="Non Asrama">Non Asrama</option></select>
+<button class="btn btn-light" onclick="resetTandaBroadcast()" style="margin:0;font-size:12px;"><i class="fas fa-eraser"></i> Hapus Tanda Terkirim</button>
+</div></div>
+<p style="font-size:12px;color:var(--text-light);margin-bottom:15px;">Klik <b>Kirim WA</b> pada tiap baris. WhatsApp akan terbuka dengan pesan lengkap (link portal + NIS + PIN) siap kirim ke nomor wali — kamu tinggal tekan tombol kirim di WhatsApp. Baris yang sudah dikirim otomatis diberi tanda ✓.</p>
+<div class="table-wrapper" style="margin-top:0;max-height:420px;overflow-y:auto;">
+<table style="margin:0;"><thead><tr><th>No.</th><th>Siswa</th><th>Kelas</th><th>No. WA Wali</th><th>Status</th><th>Aksi</th></tr></thead><tbody id="bc-tbody"></tbody></table>
+</div>
 </div>
 </section>
 
@@ -1547,6 +1561,72 @@ window.resetSemuaKeuangan = async function() {
     logAudit('Reset Keuangan', `${nTrx} transaksi dihapus (Setor ${formatRp(tSetor)} / Tarik ${formatRp(tTarik)}), saldo ${sIds.length} siswa di-nol-kan. Backup JSON diunduh.`);
     Swal.fire({icon:'success', title:'Keuangan Direset', html:`${nTrx} transaksi dihapus dan semua saldo kembali <b>Rp 0</b>.<br>Data siswa tetap aman.`, confirmButtonColor:'#6c5ce7'});
   } catch(e) { console.error(e); Swal.fire({icon:'error', title:'Gagal', text:'Terjadi kesalahan saat mereset. Sebagian data mungkin sudah terhapus - cek tabel mutasi.', confirmButtonColor:'#6c5ce7'}); }
+};
+
+// === 18D. BROADCAST AKSES PORTAL WALI VIA WA ===
+// Semi-otomatis: pesan lengkap (link + NIS + PIN) tersusun otomatis per wali,
+// admin tinggal tekan kirim di WhatsApp. Status terkirim disimpan di perangkat ini.
+function bcGetSent() { try { return JSON.parse(localStorage.getItem('bc_sent') || '{}'); } catch(e) { return {}; } }
+function bcSetSent(o) { localStorage.setItem('bc_sent', JSON.stringify(o)); }
+
+window.bukaBroadcastWA = function() {
+  const area = document.getElementById('broadcast-area');
+  area.style.display = area.style.display === 'none' ? 'block' : 'none';
+  if(area.style.display === 'block') { renderBroadcastList(); area.scrollIntoView({behavior:'smooth'}); }
+};
+
+window.renderBroadcastList = function() {
+  const filter = document.getElementById('bc_filter').value;
+  const sent = bcGetSent();
+  const tbody = document.getElementById('bc-tbody'); tbody.innerHTML = '';
+  let list = siswaDataCache.slice().sort((a,b) => (a.nama||'').localeCompare(b.nama||''));
+  if(filter) list = list.filter(s => s.asrama === filter);
+  if(list.length === 0) { tbody.innerHTML = "<tr><td colspan='6' style='text-align:center;'>Tidak ada siswa.</td></tr>"; return; }
+  list.forEach((s, i) => {
+    const punyaWA = s.wa && String(s.wa).replace(/[^0-9]/g,'').length >= 9;
+    const sudah = !!sent[s.nis];
+    const status = sudah ? "<span class='badge badge-gray' style='background:#e4ffe9;color:#1e7e34;'><i class='fas fa-check'></i> Terkirim</span>" : "<span class='badge badge-gray'>Belum</span>";
+    const aksi = punyaWA
+      ? `<button class='btn ${sudah?'btn-light':'btn-primary'}' onclick='kirimBroadcastWA("${s.id}")' style='padding:8px 14px;font-size:11px;margin:0;${sudah?'':'background:linear-gradient(135deg,#25d366,#128c7e);border:none;'}'><i class='fab fa-whatsapp'></i> ${sudah?'Kirim Ulang':'Kirim WA'}</button>`
+      : "<span style='font-size:11px;color:var(--danger);'>No. WA kosong</span>";
+    tbody.insertAdjacentHTML('beforeend', `<tr><td>${i+1}</td><td><strong style="color:var(--primary);">${escapeHtml(s.nama)}</strong><div style="font-size:10px;color:var(--text-light);">NIS: ${escapeHtml(s.nis)} • ${escapeHtml(s.asrama||'')}</div></td><td>${escapeHtml(s.kelas||'-')}</td><td>${escapeHtml(s.wa||'-')}</td><td>${status}</td><td>${aksi}</td></tr>`);
+  });
+};
+
+window.kirimBroadcastWA = function(id) {
+  const s = studentsList[id]; if(!s) return;
+  let wa = String(s.wa||'').replace(/[^0-9]/g,''); if(wa.startsWith('0')) wa = '62' + wa.slice(1);
+  if(!wa) { Swal.fire({icon:'error', title:'No. WA Kosong', text:'Lengkapi nomor WA wali di data siswa terlebih dahulu.', confirmButtonColor:'#6c5ce7'}); return; }
+  const linkPortal = window.location.origin + window.location.pathname + '?login_nis=' + encodeURIComponent(s.nis);
+  const namaSekolah = (appSettings && appSettings.namaSekolahAsrama) ? appSettings.namaSekolahAsrama.split('\n')[0] : 'SMP Global Andalan Estate Pelalawan';
+  const msg =
+`Assalamu'alaikum Wr. Wb.
+
+Yth. Bapak/Ibu Wali dari ananda *${s.nama}* (Kelas ${s.kelas||'-'}, ${s.asrama||'-'}).
+
+Kami dari Pembina Asrama ${namaSekolah} menyampaikan akses *Portal Wali* agar Bapak/Ibu dapat memantau tabungan dan catatan kedisiplinan ananda secara online kapan saja.
+
+Cara masuk:
+1. Klik link berikut: ${linkPortal}
+2. NIS sudah terisi otomatis: *${s.nis}*
+3. Masukkan PIN: *${s.pin||'123456'}*
+4. Tekan tombol "Cek Portal Wali"
+
+Mohon *simpan pesan ini* dan *jangan bagikan* NIS/PIN kepada pihak lain demi keamanan data ananda.
+
+Terima kasih atas perhatian dan kerja samanya. 🙏
+
+Wassalamu'alaikum Wr. Wb.
+- Pembina Asrama ${namaSekolah}`;
+  window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank');
+  const sent = bcGetSent(); sent[s.nis] = Date.now(); bcSetSent(sent);
+  logAudit('Broadcast WA', `Akses portal dikirim ke wali ${s.nama} (NIS: ${s.nis})`);
+  renderBroadcastList();
+};
+
+window.resetTandaBroadcast = function() {
+  Swal.fire({ title:'Hapus semua tanda terkirim?', text:'Daftar akan kembali berstatus "Belum". Data siswa tidak terpengaruh.', icon:'question', showCancelButton:true, confirmButtonColor:'#6c5ce7', confirmButtonText:'Ya, Hapus Tanda', cancelButtonText:'Batal' })
+    .then(r => { if(r.isConfirmed) { bcSetSent({}); renderBroadcastList(); } });
 };
 
 // === 18B. KOREKSI TRANSAKSI (JURNAL BALIK) ===
