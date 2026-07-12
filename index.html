@@ -4,6 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Sistem Asrama - SMP GA BOARDING PES</title>
+<!-- === PWA === -->
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#6c5ce7">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Sistem Asrama">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -213,6 +222,7 @@ tbody tr td:last-child{border-top-right-radius:16px;border-bottom-right-radius:1
 <div class="form-group"><label>PIN / Token Akses</label><input class="form-control" id="login_pin" placeholder="PIN 6 digit atau token kartu" required type="password"></div>
 <button class="btn btn-primary" id="btn-login-ortu" style="width:100%;" type="submit">Cek Portal Wali</button>
 </form>
+<button class="btn btn-light" id="btn-install-pwa" onclick="installPWA()" style="display:none;width:100%;margin-top:15px;color:var(--primary);border:1px dashed var(--primary);"><i class="fas fa-download"></i> Install Aplikasi di Perangkat Ini</button>
 </div>
 </div>
 
@@ -330,6 +340,7 @@ tbody tr td:last-child{border-top-right-radius:16px;border-bottom-right-radius:1
 <!-- KEUANGAN -->
 <section class="view-section" id="page-keuangan">
 <div class="page-header"><h2 class="page-title">Sistem Keuangan</h2><div class="header-actions">
+<button class="btn btn-light" onclick="resetSemuaKeuangan()" style="margin:0;color:var(--danger);border:1px solid #ffd3d3;"><i class="fas fa-eraser"></i> Reset Keuangan</button>
 <button class="btn btn-light" onclick="exportCSV('mutasi')" style="margin:0;"><i class="fas fa-download"></i> Mutasi</button>
 <button class="btn btn-light" onclick="exportCSV('rekap')" style="margin:0;"><i class="fas fa-download"></i> Rekap</button>
 <button class="btn btn-light" onclick="document.getElementById('modal-keuangan').classList.add('active');document.getElementById('t_jenis').value='Tarik';" style="color:var(--text-dark);"><i class="fas fa-arrow-up"></i> Tarik</button>
@@ -616,6 +627,24 @@ const firebaseConfig = {
   measurementId: "G-437HC51BLQ"
 };
 if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
+
+// === PWA: SERVICE WORKER & INSTALL PROMPT ===
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(e => console.warn('SW gagal:', e)); });
+}
+let deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault(); deferredInstallPrompt = e;
+  const btn = document.getElementById('btn-install-pwa'); if(btn) btn.style.display = 'block';
+});
+window.installPWA = async function() {
+  if(!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  const { outcome } = await deferredInstallPrompt.userChoice;
+  if(outcome === 'accepted') { const btn = document.getElementById('btn-install-pwa'); if(btn) btn.style.display = 'none'; }
+  deferredInstallPrompt = null;
+};
+window.addEventListener('appinstalled', () => { const btn = document.getElementById('btn-install-pwa'); if(btn) btn.style.display = 'none'; });
 const db = firebase.firestore();
 const auth = firebase.auth();
 const storage = firebase.storage();
@@ -722,6 +751,40 @@ function bfFail() {
   else if(warnEl) { warnEl.style.display = 'block'; warnEl.innerHTML = `<i class="fas fa-exclamation-triangle"></i> Login gagal. Sisa ${sisa} percobaan sebelum diblokir 10 menit.`; }
 }
 function bfClear() { bfSetState({count:0, lockUntil:0}); const w = document.getElementById('bf-warning'); if(w) w.style.display='none'; }
+
+// === 4B. RATE LIMIT SERVER-SIDE (FIRESTORE) ===
+// Lapisan kedua: percobaan gagal dicatat per-NIS di Firestore (koleksi login_guard),
+// sehingga blokir tetap berlaku walau pelaku ganti perangkat / mode incognito / hapus cache.
+const GUARD_MAX = 5;                    // maksimal 5 kali gagal
+const GUARD_LOCK_MS = 15 * 60 * 1000;   // blokir 15 menit
+async function guardCheck(nis) {
+  try {
+    const doc = await db.collection('login_guard').doc(String(nis)).get();
+    if(!doc.exists) return { locked: false };
+    const g = doc.data();
+    if(g.lockUntil && Date.now() < g.lockUntil) return { locked: true, until: g.lockUntil };
+    return { locked: false };
+  } catch(e) { return { locked: false }; } // jangan kunci wali jika Firestore bermasalah
+}
+async function guardFail(nis) {
+  try {
+    const ref = db.collection('login_guard').doc(String(nis));
+    await db.runTransaction(async (t) => {
+      const doc = await t.get(ref);
+      let fails = 1, lockUntil = 0;
+      if(doc.exists) {
+        const g = doc.data();
+        // reset hitungan jika lock lama sudah lewat
+        fails = (g.lockUntil && Date.now() >= g.lockUntil) ? 1 : (g.fails || 0) + 1;
+      }
+      if(fails >= GUARD_MAX) { lockUntil = Date.now() + GUARD_LOCK_MS; fails = 0; }
+      t.set(ref, { fails: fails, lockUntil: lockUntil, terakhir: firebase.firestore.FieldValue.serverTimestamp() });
+    });
+  } catch(e) { console.warn('guardFail:', e); }
+}
+async function guardClear(nis) {
+  try { await db.collection('login_guard').doc(String(nis)).delete(); } catch(e) {}
+}
 let lockoutTimerInterval = null;
 function startLockoutTimer(until) {
   const warnEl = document.getElementById('bf-warning');
@@ -857,9 +920,17 @@ async function prosesLoginOrtu(nis, cred) {
   if(!bfCheck()) { return; }
   const btn = document.getElementById('btn-login-ortu');
   if(btn) { btn.innerHTML="<i class='fas fa-spinner fa-spin'></i>"; btn.disabled=true; }
+  // Cek blokir server-side (per-NIS, lintas perangkat)
+  const guard = await guardCheck(nis);
+  if(guard.locked) {
+    const sisaMnt = Math.ceil((guard.until - Date.now()) / 60000);
+    if(btn) { btn.innerHTML = "Cek Portal Wali"; btn.disabled = false; }
+    Swal.fire({icon:'error', title:'Akses Diblokir Sementara', html:`NIS ini diblokir karena terlalu banyak percobaan gagal.<br>Coba lagi dalam <b>± ${sisaMnt} menit</b>.`, confirmButtonColor:'#6c5ce7'});
+    return;
+  }
   try {
     const snap = await db.collection("siswa").where("nis", "==", nis).get();
-    if(snap.empty) { bfFail(); Swal.fire({icon:'error', title:'Gagal', text:'NIS tidak ditemukan di sistem.', confirmButtonColor:'#6c5ce7'}); }
+    if(snap.empty) { bfFail(); await guardFail(nis); Swal.fire({icon:'error', title:'Gagal', text:'NIS tidak ditemukan di sistem.', confirmButtonColor:'#6c5ce7'}); }
     else {
       const studentData = snap.docs[0].data(); const studentId = snap.docs[0].id;
       // Verifikasi: token (hash) jika ada, atau PIN lama (backward-compatible)
@@ -869,9 +940,9 @@ async function prosesLoginOrtu(nis, cred) {
         if(h === studentData.tokenHash) lolos = true;
       }
       if(!lolos) { const dbPin = studentData.pin || '123456'; if(cred === dbPin) lolos = true; }
-      if(!lolos) { bfFail(); Swal.fire({icon:'error', title:'Akses Ditolak', text:'PIN / Token akses salah!', confirmButtonColor:'#6c5ce7'}); }
+      if(!lolos) { bfFail(); await guardFail(nis); Swal.fire({icon:'error', title:'Akses Ditolak', text:'PIN / Token akses salah!', confirmButtonColor:'#6c5ce7'}); }
       else {
-        bfClear();
+        bfClear(); guardClear(nis);
         document.getElementById('login-screen').style.display='none'; document.getElementById('parent-layout').style.display='block';
         document.getElementById('ortu_nama').innerText = studentData.nama; document.getElementById('ortu_nis').innerText = studentData.nis; document.getElementById('ortu_kelas').innerText = studentData.kelas; document.getElementById('ortu_asrama').innerText = studentData.asrama;
         if(studentData.foto) document.getElementById('ortu_foto').src = studentData.foto;
@@ -1267,7 +1338,16 @@ window.filterKeuangan = function() {
   document.getElementById('dash-total-dana').innerText=formatRp(totalDana); document.getElementById('k_tot_setor').innerText=formatRp(tSetor); document.getElementById('k_tot_tarik').innerText=formatRp(tTarik); document.getElementById('k_tot_saldo').innerText=formatRp(totalDana);
   const tbody=document.getElementById('tabel-keuangan-body'); tbody.innerHTML='';
   if(filtered.length===0) { tbody.innerHTML="<tr><td colspan='6' style='text-align:center;'>Tidak ada transaksi.</td></tr>"; renderRekapTable(); return; }
-  filtered.forEach(d => { const nama=studentsList[d.id_siswa]?studentsList[d.id_siswa].nama:"Siswa Dihapus"; const isSetor=d.jenis==='Setor'; tbody.insertAdjacentHTML('beforeend', `<tr><td><strong>KAS ASRAMA</strong><div style="font-size:10px;color:var(--text-light);margin-top:3px;">${formatTgl(d.tgl)}</div></td><td><strong style="color:var(--primary);">${escapeHtml(nama)}</strong></td><td><span class='badge badge-gray'>${escapeHtml(d.jenis).toUpperCase()}</span></td><td style='font-weight:800;color:${isSetor?'var(--success)':'var(--danger)'}'>${isSetor?'+':'-'} ${formatRp(d.nominal)}</td><td>${escapeHtml(d.ket)}</td><td><div class='action-cell'><button class='action-btn btn-del' onclick='hapusData("tabungan","${d.id}")'><i class='fas fa-trash'></i></button></div></td></tr>`); });
+  filtered.forEach(d => {
+    const nama=studentsList[d.id_siswa]?studentsList[d.id_siswa].nama:"Siswa Dihapus"; const isSetor=d.jenis==='Setor';
+    const isKoreksi = !!d.koreksi_dari;
+    const sudahDikoreksi = !!d.dikoreksi;
+    let aksiHtml = '';
+    if(isKoreksi) { aksiHtml = "<span class='badge badge-gray' style='font-size:9px;'><i class='fas fa-rotate-left'></i> JURNAL BALIK</span>"; }
+    else if(sudahDikoreksi) { aksiHtml = "<span class='badge badge-gray' style='font-size:9px;background:#ffe9e9;color:var(--danger);'>DIKOREKSI</span>"; }
+    else { aksiHtml = `<button class='action-btn' style='color:var(--warning);background:#fff6e5;' title='Koreksi transaksi (jurnal balik)' onclick='koreksiTransaksi("${d.id}")'><i class='fas fa-rotate-left'></i></button>`; }
+    tbody.insertAdjacentHTML('beforeend', `<tr style="${(isKoreksi||sudahDikoreksi)?'opacity:0.65;':''}"><td><strong>KAS ASRAMA</strong><div style="font-size:10px;color:var(--text-light);margin-top:3px;">${formatTgl(d.tgl)}</div></td><td><strong style="color:var(--primary);">${escapeHtml(nama)}</strong></td><td><span class='badge badge-gray'>${escapeHtml(d.jenis).toUpperCase()}</span></td><td style='font-weight:800;color:${isSetor?'var(--success)':'var(--danger)'}'>${isSetor?'+':'-'} ${formatRp(d.nominal)}</td><td>${escapeHtml(d.ket)}</td><td><div class='action-cell'>${aksiHtml}</div></td></tr>`);
+  });
   renderRekapTable();
 };
 window.resetFilterKeuangan = function() { document.getElementById('k_start').value=''; document.getElementById('k_end').value=''; document.getElementById('k_siswa').value=''; filterKeuangan(); };
@@ -1366,6 +1446,118 @@ document.getElementById('form-piket').addEventListener('submit', async (e) => { 
 document.getElementById('form-kegiatan').addEventListener('submit', async (e) => { e.preventDefault(); const idSiswa=document.getElementById('keg_pic').value; const namaSiswa=studentsList[idSiswa]?studentsList[idSiswa].nama:'Unknown'; try { await db.collection("kegiatan").add({ waktu:document.getElementById('keg_waktu').value, nama:document.getElementById('keg_nama').value, pic:namaSiswa, id_siswa:idSiswa, tgl_input:firebase.firestore.FieldValue.serverTimestamp() }); logAudit('Tambah Kegiatan', document.getElementById('keg_nama').value); document.getElementById('form-kegiatan').reset(); tutupModal('modal-kegiatan'); Swal.fire({icon:'success', title:'Tersimpan', text:'Kegiatan berhasil ditambahkan', timer:1500, showConfirmButton:false}); } catch(err){} });
 document.getElementById('form-inventaris').addEventListener('submit', async (e) => { e.preventDefault(); try { await db.collection("inventaris").add({ nama:document.getElementById('v_nama').value, tahun:document.getElementById('v_tahun').value, qty:document.getElementById('v_qty').value, kondisi:document.getElementById('v_kondisi').value, asrama:document.getElementById('v_asrama').value, tgl_input:firebase.firestore.FieldValue.serverTimestamp() }); logAudit('Tambah Aset', document.getElementById('v_nama').value); document.getElementById('form-inventaris').reset(); tutupModal("modal-inventaris"); Swal.fire({icon:'success', title:'Tersimpan', text:'Inventaris ditambahkan', timer:1500, showConfirmButton:false}); } catch(err){} });
 
+// === 18C. RESET SELURUH KEUANGAN (HANYA UANG, DATA SISWA AMAN) ===
+// Menghapus SEMUA riwayat transaksi & mengembalikan saldo semua siswa ke Rp 0.
+// Data siswa, pelanggaran, aset, dll TIDAK disentuh. Backup JSON diunduh otomatis dulu.
+window.resetSemuaKeuangan = async function() {
+  const nTrx = tabunganDataCache.length;
+  if(nTrx === 0) { Swal.fire({icon:'info', title:'Tidak Ada Data', text:'Belum ada transaksi keuangan untuk direset.', confirmButtonColor:'#6c5ce7'}); return; }
+  let tSetor=0, tTarik=0; tabunganDataCache.forEach(t => { if(t.jenis==='Setor') tSetor+=t.nominal; else tTarik+=t.nominal; });
+  const step1 = await Swal.fire({
+    title: 'Reset Seluruh Keuangan?',
+    html: `<div style="text-align:left;font-size:13px;">Tindakan ini akan:<br>
+      • Menghapus <b>${nTrx} transaksi</b> (Setor ${formatRp(tSetor)} / Tarik ${formatRp(tTarik)})<br>
+      • Mengembalikan saldo <b>semua siswa ke Rp 0</b><br><br>
+      <div style="background:#e4ffe9;border-radius:10px;padding:12px;font-size:12px;color:#1e7e34;"><i class="fas fa-shield-alt"></i> <b>Data siswa, pelanggaran, aset, dan lainnya TIDAK terhapus.</b> Hanya data uang yang direset.</div><br>
+      <div style="background:#fff8e1;border-radius:10px;padding:12px;font-size:12px;color:#856404;"><i class="fas fa-download"></i> Backup JSON seluruh transaksi &amp; rekap saldo akan <b>diunduh otomatis</b> sebelum penghapusan.</div></div>`,
+    icon: 'warning', showCancelButton: true, confirmButtonColor: '#ff4757',
+    confirmButtonText: 'Lanjut', cancelButtonText: 'Batal'
+  });
+  if(!step1.isConfirmed) return;
+
+  // Backup otomatis sebelum hapus
+  const rekap = {};
+  tabunganDataCache.forEach(t => {
+    const s = studentsList[t.id_siswa];
+    const key = s ? `${s.nis} - ${s.nama}` : `(terhapus) ${t.id_siswa}`;
+    if(!rekap[key]) rekap[key] = { setor: 0, tarik: 0 };
+    if(t.jenis === 'Setor') rekap[key].setor += t.nominal; else rekap[key].tarik += t.nominal;
+  });
+  Object.keys(rekap).forEach(k => { rekap[k].saldo_akhir = rekap[k].setor - rekap[k].tarik; });
+  const backup = {
+    dibuat: new Date().toISOString(),
+    keterangan: 'Backup otomatis sebelum Reset Keuangan - Sistem Asrama SMP GA',
+    total_transaksi: nTrx, total_setor: tSetor, total_tarik: tTarik,
+    rekap_saldo: rekap,
+    transaksi: tabunganDataCache.map(t => ({
+      id: t.id, nis: studentsList[t.id_siswa] ? studentsList[t.id_siswa].nis : '', nama: studentsList[t.id_siswa] ? studentsList[t.id_siswa].nama : 'Siswa Dihapus',
+      jenis: t.jenis, nominal: t.nominal, ket: t.ket || '', tgl: formatTgl(t.tgl), dikoreksi: !!t.dikoreksi, koreksi_dari: t.koreksi_dari || null
+    }))
+  };
+  const blob = new Blob([JSON.stringify(backup, null, 2)], {type: 'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `backup_keuangan_${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(a.href);
+
+  const step2 = await Swal.fire({
+    title: 'Konfirmasi Terakhir',
+    html: `Backup sudah diunduh. Ketik <b>RESET</b> untuk menghapus permanen seluruh riwayat keuangan.`,
+    input: 'text', inputPlaceholder: 'Ketik: RESET',
+    showCancelButton: true, confirmButtonColor: '#ff4757',
+    confirmButtonText: '<i class="fas fa-eraser"></i> Hapus Sekarang', cancelButtonText: 'Batal',
+    preConfirm: (v) => { if(v !== 'RESET') { Swal.showValidationMessage('Ketik RESET (huruf besar) untuk melanjutkan'); return false; } return true; }
+  });
+  if(!step2.isConfirmed) return;
+
+  Swal.fire({ title: 'Mereset Keuangan...', html: 'Mohon tunggu, jangan tutup halaman.', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+  try {
+    // Hapus semua dokumen tabungan (batch maksimal 400 per commit)
+    const ids = tabunganDataCache.map(t => t.id);
+    for(let i = 0; i < ids.length; i += 400) {
+      const batch = db.batch();
+      ids.slice(i, i + 400).forEach(id => batch.delete(db.collection('tabungan').doc(id)));
+      await batch.commit();
+    }
+    // Nol-kan saldo semua siswa (data siswa lain tidak disentuh)
+    const sIds = siswaDataCache.map(s => s.id);
+    for(let i = 0; i < sIds.length; i += 400) {
+      const batch = db.batch();
+      sIds.slice(i, i + 400).forEach(id => batch.update(db.collection('siswa').doc(id), { saldo: 0 }));
+      await batch.commit();
+    }
+    logAudit('Reset Keuangan', `${nTrx} transaksi dihapus (Setor ${formatRp(tSetor)} / Tarik ${formatRp(tTarik)}), saldo ${sIds.length} siswa di-nol-kan. Backup JSON diunduh.`);
+    Swal.fire({icon:'success', title:'Keuangan Direset', html:`${nTrx} transaksi dihapus dan semua saldo kembali <b>Rp 0</b>.<br>Data siswa tetap aman.`, confirmButtonColor:'#6c5ce7'});
+  } catch(e) { console.error(e); Swal.fire({icon:'error', title:'Gagal', text:'Terjadi kesalahan saat mereset. Sebagian data mungkin sudah terhapus - cek tabel mutasi.', confirmButtonColor:'#6c5ce7'}); }
+};
+
+// === 18B. KOREKSI TRANSAKSI (JURNAL BALIK) ===
+// Transaksi keuangan TIDAK bisa dihapus/diedit demi keutuhan jejak audit.
+// Jika salah input, buat jurnal balik: transaksi lawan yang menetralkan efeknya.
+window.koreksiTransaksi = function(id) {
+  const trx = tabunganDataCache.find(t => t.id === id);
+  if(!trx) return;
+  if(trx.dikoreksi) { Swal.fire({icon:'info', title:'Sudah Dikoreksi', text:'Transaksi ini sudah pernah dikoreksi.', confirmButtonColor:'#6c5ce7'}); return; }
+  if(trx.koreksi_dari) { Swal.fire({icon:'info', title:'Jurnal Balik', text:'Ini adalah transaksi koreksi, tidak bisa dikoreksi lagi.', confirmButtonColor:'#6c5ce7'}); return; }
+  const nama = studentsList[trx.id_siswa] ? studentsList[trx.id_siswa].nama : 'Siswa Dihapus';
+  const jenisBalik = trx.jenis === 'Setor' ? 'Tarik' : 'Setor';
+  Swal.fire({
+    title: 'Koreksi Transaksi?',
+    html: `Transaksi <b>${escapeHtml(trx.jenis)} ${formatRp(trx.nominal)}</b> milik <b>${escapeHtml(nama)}</b> akan dinetralkan dengan jurnal balik <b>${jenisBalik} ${formatRp(trx.nominal)}</b>.<br><br><div style="text-align:left;background:#fff8e1;border-radius:10px;padding:12px;font-size:12px;color:#856404;"><i class="fas fa-info-circle"></i> Kedua transaksi tetap tercatat di riwayat (jejak audit tidak dihapus). Saldo siswa otomatis kembali seperti sebelum salah input.</div>`,
+    icon: 'warning', showCancelButton: true, confirmButtonColor: '#ffa502',
+    confirmButtonText: '<i class="fas fa-rotate-left"></i> Ya, Koreksi', cancelButtonText: 'Batal'
+  }).then(async (r) => {
+    if(!r.isConfirmed) return;
+    try {
+      await db.runTransaction(async (t) => {
+        const sRef = db.collection('siswa').doc(trx.id_siswa);
+        const sDoc = await t.get(sRef);
+        if(sDoc.exists) {
+          let saldo = sDoc.data().saldo || 0;
+          if(jenisBalik === 'Setor') saldo += trx.nominal; else saldo -= trx.nominal;
+          t.update(sRef, { saldo: saldo });
+        }
+        t.set(db.collection('tabungan').doc(), {
+          id_siswa: trx.id_siswa, jenis: jenisBalik, nominal: trx.nominal,
+          ket: `KOREKSI: ${trx.ket || trx.jenis}`, koreksi_dari: id,
+          tgl: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        t.update(db.collection('tabungan').doc(id), { dikoreksi: true });
+      });
+      logAudit('Koreksi Transaksi', `Jurnal balik ${jenisBalik} ${formatRp(trx.nominal)} - ${nama}`);
+      Swal.fire({icon:'success', title:'Terkoreksi', text:'Jurnal balik berhasil dibuat, saldo sudah dinetralkan.', timer:2000, showConfirmButton:false});
+    } catch(e) { console.error(e); Swal.fire({icon:'error', title:'Gagal', text:'Koreksi gagal diproses.', confirmButtonColor:'#6c5ce7'}); }
+  });
+};
+
 // === 19. DELETE FUNCTIONS (CASCADE) ===
 window.hapusData = function(koleksi, id) {
   let extraWarning = '';
@@ -1391,22 +1583,9 @@ window.hapusData = function(koleksi, id) {
           await db.collection('siswa').doc(id).delete();
           if(s && s.foto) { deleteStorageByUrl(s.foto); }
         } else if(koleksi === 'tabungan') {
-          // Koreksi saldo siswa: balikkan efek transaksi
-          const trx = tabunganDataCache.find(t => t.id === id);
-          await db.runTransaction(async (t) => {
-            const tRef = db.collection('tabungan').doc(id);
-            if(trx && trx.id_siswa) {
-              const sRef = db.collection('siswa').doc(trx.id_siswa);
-              const sDoc = await t.get(sRef);
-              if(sDoc.exists) {
-                let saldo = sDoc.data().saldo || 0;
-                if(trx.jenis === 'Setor') saldo -= trx.nominal; else saldo += trx.nominal;
-                t.update(sRef, { saldo: saldo });
-              }
-            }
-            t.delete(tRef);
-          });
-          if(trx) auditDetail = `Transaksi ${trx.jenis} ${formatRp(trx.nominal)} (saldo dikoreksi)`;
+          // Transaksi keuangan dikunci: tidak boleh dihapus, gunakan koreksiTransaksi (jurnal balik)
+          Swal.fire({icon:'warning', title:'Transaksi Terkunci', text:'Transaksi keuangan tidak dapat dihapus. Gunakan tombol Koreksi (jurnal balik).', confirmButtonColor:'#6c5ce7'});
+          return;
         } else if(koleksi === 'pelanggaran') {
           // Koreksi poin siswa: kurangi poin yang sebelumnya ditambahkan
           const pel = pelanggaranDataCache.find(p => p.id === id);

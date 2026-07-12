@@ -1,0 +1,32 @@
+{
+  "name": "Sistem Asrama - SMP Global Andalan",
+  "short_name": "Sistem Asrama",
+  "description": "Sistem manajemen asrama SMP Global Andalan Estate Pelalawan: data siswa, tabungan, kedisiplinan, dan portal wali.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f0f4f8",
+  "theme_color": "#6c5ce7",
+  "lang": "id",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
