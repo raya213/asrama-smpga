@@ -1409,9 +1409,17 @@ window.filterKeuangan = function() {
 window.resetFilterKeuangan = function() { document.getElementById('k_start').value=''; document.getElementById('k_end').value=''; document.getElementById('k_siswa').value=''; filterKeuangan(); };
 
 // === WA NOTIFICATION ===
+// Salam otomatis berdasarkan jam perangkat
+function salamWaktu() {
+  const jam = new Date().getHours();
+  if(jam >= 4 && jam < 11) return 'Selamat pagi';
+  if(jam >= 11 && jam < 15) return 'Selamat siang';
+  if(jam >= 15 && jam < 18) return 'Selamat sore';
+  return 'Selamat malam';
+}
 window.kirimWA = function(no, nama) {
   let wa = String(no).replace(/[^0-9]/g,''); if(wa.startsWith('0')) wa = '62' + wa.slice(1);
-  const msg = encodeURIComponent(`Assalamu'alaikum, Bapak/Ibu Wali dari ananda ${nama}. Kami dari pihak Asrama SMP Global Andalan ingin menyampaikan informasi.`);
+  const msg = encodeURIComponent(`${salamWaktu()}, Bapak/Ibu Wali dari ananda ${nama}. Kami dari pihak Asrama SMP Global Andalan Estate Pelalawan ingin menyampaikan informasi.`);
   window.open(`https://wa.me/${wa}?text=${msg}`, '_blank');
 };
 // === 18. FORM HANDLERS ===
@@ -1476,7 +1484,7 @@ document.getElementById('form-keuangan').addEventListener('submit', async (e) =>
       Swal.fire({ icon:'success', title:'Transaksi Tersimpan', html:`${jenis} <b>${formatRp(nominal)}</b> untuk ${siswa.nama} berhasil.<br>Kirim notifikasi ke wali?`, showCancelButton:true, confirmButtonColor:'#2ed573', confirmButtonText:'<i class="fab fa-whatsapp"></i> Kirim WA', cancelButtonText:'Tutup' }).then((r) => {
         if(r.isConfirmed) {
           let wa = String(siswa.wa).replace(/[^0-9]/g,''); if(wa.startsWith('0')) wa='62'+wa.slice(1);
-          const msg = encodeURIComponent(`Assalamu'alaikum Bapak/Ibu Wali dari ananda ${siswa.nama}.\n\nNotifikasi transaksi tabungan asrama:\nJenis: ${jenis}\nNominal: ${formatRp(nominal)}\nKeterangan: ${ket}\n\nTerima kasih. - Asrama SMP Global Andalan`);
+          const msg = encodeURIComponent(`${salamWaktu()}, Bapak/Ibu Wali dari ananda ${siswa.nama}.\n\nNotifikasi transaksi tabungan asrama:\nJenis: ${jenis}\nNominal: ${formatRp(nominal)}\nKeterangan: ${ket}\n\nTerima kasih.\nPembina Asrama SMP Global Andalan Estate Pelalawan`);
           window.open(`https://wa.me/${wa}?text=${msg}`, '_blank');
         }
       });
@@ -1611,8 +1619,9 @@ window.kirimBroadcastWA = function(id) {
   if(!wa) { Swal.fire({icon:'error', title:'No. WA Kosong', text:'Lengkapi nomor WA wali di data siswa terlebih dahulu.', confirmButtonColor:'#6c5ce7'}); return; }
   const linkPortal = window.location.origin + window.location.pathname + '?login_nis=' + encodeURIComponent(s.nis);
   const namaSekolah = (appSettings && appSettings.namaSekolahAsrama) ? appSettings.namaSekolahAsrama.split('\n')[0] : 'SMP Global Andalan Estate Pelalawan';
+  const salam = salamWaktu();
   const msg =
-`Assalamu'alaikum Wr. Wb.
+`${salam}, Bapak/Ibu.
 
 Yth. Bapak/Ibu Wali dari ananda *${s.nama}* (Kelas ${s.kelas||'-'}, ${s.asrama||'-'}).
 
@@ -1628,8 +1637,8 @@ Mohon *simpan pesan ini* dan *jangan bagikan* NIS/PIN kepada pihak lain demi kea
 
 Terima kasih atas perhatian dan kerja samanya. 🙏
 
-Wassalamu'alaikum Wr. Wb.
-- Pembina Asrama ${namaSekolah}`;
+Hormat kami,
+Pembina Asrama ${namaSekolah}`;
   window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank');
   const sent = bcGetSent(); sent[s.nis] = Date.now(); bcSetSent(sent);
   logAudit('Broadcast WA', `Akses portal dikirim ke wali ${s.nama} (NIS: ${s.nis})`);
