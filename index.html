@@ -1162,19 +1162,49 @@ function importCSV(input) {
   const file = input.files[0]; if(!file) return;
   const reader = new FileReader();
   reader.onload = async function(e) {
-    const text = e.target.result; const rows = text.split('\n'); let successCount=0; let skipCount=0;
-    const existingNis = new Set(siswaDataCache.map(d => d.nis));
+    // Pilih mode: lewati duplikat atau perbarui data lama
+    const mode = await Swal.fire({
+      title: 'Mode Import CSV',
+      html: `<div style="text-align:left;font-size:13px;">Jika ada NIS yang sudah terdaftar di sistem:<br><br>
+        <b>Perbarui Data Lama</b> — nama, kelas, asrama, No. WA, dan PIN diperbarui dari CSV. <span style="color:#1e7e34;">Saldo, poin, foto, dan token QR tetap aman (tidak disentuh).</span><br><br>
+        <b>Lewati Duplikat</b> — data lama dibiarkan apa adanya, hanya NIS baru yang ditambahkan.</div>`,
+      icon: 'question', showCancelButton: true, showDenyButton: true,
+      confirmButtonColor: '#6c5ce7', denyButtonColor: '#8b95a5',
+      confirmButtonText: '<i class="fas fa-sync"></i> Perbarui Data Lama',
+      denyButtonText: 'Lewati Duplikat', cancelButtonText: 'Batal'
+    });
+    if(mode.isDismissed) { input.value=''; return; }
+    const doUpdate = mode.isConfirmed;
+
+    const text = e.target.result; const rows = text.split('\n');
+    let successCount=0, updateCount=0, skipCount=0;
+    // Peta NIS -> id dokumen siswa yang sudah ada
+    const nisToId = {}; siswaDataCache.forEach(d => { nisToId[d.nis] = d.id; });
+    const prosesNis = new Set(); // cegah NIS ganda di dalam file CSV yang sama
+    let batch = db.batch(); let ops = 0;
+    const flush = async () => { if(ops > 0) { await batch.commit(); batch = db.batch(); ops = 0; } };
+
     for(let i=1; i<rows.length; i++) {
       const row = rows[i].split(/[,;]/); if(row.length<4) continue;
       const nis=row[0].trim(); const nama=row[1].trim(); const kelas=row[2].trim(); const asrama=row[3].trim(); const wa=row[4]?row[4].trim():''; const pin=row[5]?row[5].trim():'123456';
       if(!nis||!nama) continue;
-      if(existingNis.has(nis)) { skipCount++; continue; }
-      existingNis.add(nis);
-      await db.collection("siswa").add({ nis, nama, kelas, asrama, wa, pin, foto:'', saldo:0, poin:0, tgl_input: firebase.firestore.FieldValue.serverTimestamp() });
-      successCount++;
+      if(prosesNis.has(nis)) { skipCount++; continue; } // duplikat di dalam file
+      prosesNis.add(nis);
+      if(nisToId[nis]) {
+        if(doUpdate) {
+          // Perbarui identitas saja; saldo/poin/foto/tokenHash TIDAK disentuh
+          batch.update(db.collection("siswa").doc(nisToId[nis]), { nama, kelas, asrama, wa, pin });
+          ops++; updateCount++;
+        } else { skipCount++; }
+      } else {
+        batch.set(db.collection("siswa").doc(), { nis, nama, kelas, asrama, wa, pin, foto:'', saldo:0, poin:0, tgl_input: firebase.firestore.FieldValue.serverTimestamp() });
+        ops++; successCount++;
+      }
+      if(ops >= 400) await flush();
     }
-    logAudit('Import CSV', `Import ${successCount} siswa, ${skipCount} dilewati (NIS duplikat)`);
-    Swal.fire({icon:'success', title:'Berhasil', html:`Berhasil import <b>${successCount}</b> data siswa.${skipCount?`<br><span style="color:#e67e22;">${skipCount} dilewati karena NIS sudah ada.</span>`:''}`, confirmButtonColor:'#6c5ce7'});
+    await flush();
+    logAudit('Import CSV', `${successCount} siswa baru, ${updateCount} diperbarui, ${skipCount} dilewati`);
+    Swal.fire({icon:'success', title:'Import Selesai', html:`<b>${successCount}</b> siswa baru ditambahkan.${updateCount?`<br><span style="color:#6c5ce7;"><b>${updateCount}</b> data siswa lama diperbarui.</span>`:''}${skipCount?`<br><span style="color:#e67e22;">${skipCount} dilewati (duplikat).</span>`:''}`, confirmButtonColor:'#6c5ce7'});
     input.value='';
   };
   reader.readAsText(file);
