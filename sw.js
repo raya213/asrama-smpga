@@ -6,13 +6,13 @@
    - Semua request Firebase/Firestore/Storage/WA TIDAK disentuh (langsung ke network)
      agar data realtime & transaksi tidak terganggu. */
 
-const CACHE_VERSION = 'asrama-v1';
+const CACHE_VERSION = 'asrama-v2';
 const APP_SHELL = [
   '/',
   '/manifest.json',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
-  '/icons/icon-maskable-512.png'
+  '/icon-192.png',
+  '/icon-512.png',
+  '/icon-maskable-512.png'
 ];
 
 // Domain yang TIDAK boleh di-intercept (data realtime / API)
