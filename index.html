@@ -1489,7 +1489,7 @@ document.getElementById('form-keuangan').addEventListener('submit', async (e) =>
         }
       });
     } else { Swal.fire({icon:'success', title:'Tersimpan', text:'Transaksi berhasil dicatat', timer:1500, showConfirmButton:false}); }
-  } catch(e) { Swal.fire({icon:'error', title:'Gagal', text:'Transaksi gagal diproses', confirmButtonColor:'#6c5ce7'}); }
+  } catch(e) { console.error('Error transaksi keuangan:', e); Swal.fire({icon:'error', title:'Gagal', html:`Transaksi gagal diproses.<br><small style="color:#999;">${escapeHtml(e.message||e.code||'Error tidak diketahui')}</small>`, confirmButtonColor:'#6c5ce7'}); }
   btn.disabled=false;
 });
 document.getElementById('form-pelanggaran').addEventListener('submit', async (e) => {
